@@ -34,7 +34,7 @@ Run the following commands in a terminal. These commands clone the GitHub reposi
 ```
 # A) Clone the repository and install jq
 sudo yum install -y jq
-git clone [https://github.com/aws-samples/eip-analyzer.git]
+git clone https://github.com/aws-samples/eip-analyzer.git
 
 # B) Switch to the repository's directory
 cd EIP-analyzer
