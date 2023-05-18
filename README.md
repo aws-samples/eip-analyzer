@@ -2,7 +2,7 @@
 
 Elastic IP address (EIP) is a static public IPv4 address allocated to your Amazon EC2 instance or other AWS resources such as LoadBalancers that you can reach via the internet. EIP addresses are designed for dynamic cloud computing because they can re-attach to another instance if their existing instance fails for resiliency. These EIPs are used for applications that must make external requests to services that require allowlisted-inbound connections. You are charged per EIP not associated with a running instance per hour. As an application scales up and down, these EIPs may occasionally be used a few times over the course of weeks or months. Over time, unused EIPs can accumulate and add unnecessary costs to your AWS bill. 
 
-In this blog post, I will show you how to analyze EIP usage history to have a better insight of your EIP usage pattern in your You can use this solution regularly as part of your cost optimization effort to safely remove unused EIPs to reduce your costs. 
+In this repo, I will show you how to analyze EIP usage history to have a better insight of your EIP usage pattern in your You can use this solution regularly as part of your cost optimization effort to safely remove unused EIPs to reduce your costs. 
 
 ## Solution overview
 
