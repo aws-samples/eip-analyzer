@@ -42,7 +42,7 @@ cd EIP-analyzer
 # C) Create a stack to deploy all prerequisites 
 aws cloudformation create-stack \
     --stack-name EIP-analyzer \
-    --template-body file://template.yml \
+    --template-body file://template.yaml \
     --capabilities CAPABILITY_IAM \
     --parameters ParameterKey=CloudTrailAthenaTableName,ParameterValue='TABLENAME'
 ```
