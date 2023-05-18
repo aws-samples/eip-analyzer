@@ -1,0 +1,381 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  Elastic IP attachment analyzer
+Parameters:
+  CloudTrailAthenaTableName:
+    Type: String
+    Description: "CloudTrail athena table name"
+  EventSearchBack:
+    Type: Number
+    Default: 3
+    Description: "Event search back in CloudTrail logs (month)"
+   
+Resources:
+
+  EIPSnapshotGlue:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId:
+        Ref: AWS::AccountId
+      DatabaseName: 'default'
+      TableInput:
+        Name: eip
+        Description: EIP snapshot
+        TableType: EXTERNAL_TABLE
+        Parameters: {
+          "EXTERNAL": "TRUE",
+          "skip.header.line.count": 1
+        }
+        StorageDescriptor:
+          Columns:
+            - Name: publicIp
+              Type: string
+            - Name: allocationId
+              Type: string
+            - Name: associationId
+              Type: string
+            - Name: PublicIpv4Pool
+              Type: string
+            - Name: accountid
+              Type: string
+            - Name: region
+              Type: string
+          Location:
+            !Join [ "", ["s3://" , Ref: EIPSnapshot, "/"]]
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          Compressed: False
+          StoredAsSubDirectories: False
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe
+            Parameters: {
+              "serialization.format" : ",",
+              "field.delim" : ","
+            }
+          Parameters: {}
+        Retention: 0
+
+  AthenaResultEIPAnalyzer:
+    Type: "AWS::S3::Bucket"
+  EIPSnapshot:
+    Type: "AWS::S3::Bucket"
+ 
+  EIPlistFinderIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: EIPAnalyzerInitilizerPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'
+
+              - Effect: Allow
+                Action:
+                  - 'ec2:DescribeAddresses'
+                  - 'ec2:DescribeRegions'
+                Resource: '*'
+                
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:GetBucketLocation'
+                Resource: 
+                  - !Sub 'arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary'
+                  - !Sub 'arn:aws:s3:::${AthenaResultEIPAnalyzer}/*'
+                  - !Sub 'arn:aws:s3:::${AthenaResultEIPAnalyzer}'
+                  - !Sub 'arn:aws:s3:::${EIPSnapshot}/*'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/default'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/associate_ip_event'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/${CloudTrailAthenaTableName}'
+
+  EIPlistFinder:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Environment:
+        Variables:
+          EIP_SNAPSHOT: 
+            Ref: EIPSnapshot
+      Timeout: 30
+      Runtime: python3.10
+      Handler: 'index.lambda_handler'
+      
+      Role: !GetAtt EIPlistFinderIAMRole.Arn
+      Code:
+        ZipFile: |
+
+          import boto3
+          import csv
+          import os
+          
+          #finding account ID
+          sts = boto3.client("sts")
+          accountid = sts.get_caller_identity()["Account"]
+          EIPSnapshot = os.environ['EIP_SNAPSHOT']
+          
+          #S3 connection
+          s3_client = boto3.client('s3')
+          
+          
+          #finding regions
+          region_list = []
+          for region in boto3.client('ec2').describe_regions()['Regions']:
+              region_list.append(region['RegionName'])
+          
+          def lambda_handler(event, context):
+          
+              with open('/tmp/eip.csv', 'w', newline='') as file:
+                  writer = csv.writer(file)
+                  writer.writerow(["publicIp", "allocationId", "associationId", "PublicIpv4Pool", "accountid", "region"])
+                          
+                  for region in region_list:
+                      ec2 = boto3.client('ec2', region_name=region)
+                      addresses_dict = ec2.describe_addresses()
+                      
+                      for eip_dict in addresses_dict['Addresses']:
+                           
+                          try:
+                              AssociationId = eip_dict['AssociationId']
+                          except:
+                              AssociationId = ''
+                              
+                          print(eip_dict['PublicIp'], eip_dict['AllocationId'], AssociationId, eip_dict['PublicIpv4Pool'], accountid, region)
+                          writer.writerow([eip_dict['PublicIp'], eip_dict['AllocationId'], AssociationId, eip_dict['PublicIpv4Pool'], accountid, region])
+                          
+              s3_client.upload_file('/tmp/eip.csv', EIPSnapshot, 'input/eip.csv')
+
+  InitilizerLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Environment:
+        Variables:
+          RESULT_OUTPUT_LOCATION: !Join [ "", ["s3://" , Ref: AthenaResultEIPAnalyzer, "/"]]
+          EIP_SNAPSHOT: !Join [ "", ["s3://" , Ref: EIPSnapshot, "/"]]
+          TRAIL_TABLE_NAME:  
+            Ref: CloudTrailAthenaTableName
+          EVENT_SEARCH_BACK: 
+            Ref: EventSearchBack
+      Code:
+        ZipFile: |
+          from json import dumps
+          import sys
+          import os
+          import traceback
+          import urllib.request
+          import boto3
+          import logging
+          logger = logging.getLogger(__name__)
+          
+          
+          athena = boto3.client('athena')
+          ATHENA_WORKGROUP = 'primary'
+          DATABASE = 'default'
+          RESULT_OUTPUT_LOCATION = os.environ['RESULT_OUTPUT_LOCATION']
+          TRAIL_TABLE_NAME = os.environ['TRAIL_TABLE_NAME']
+          EVENT_SEARCH_BACK = os.environ['EVENT_SEARCH_BACK']
+          EIP_SNAPSHOT = os.environ['EIP_SNAPSHOT']
+          
+          associate_ip_event_view = f'''CREATE OR REPLACE VIEW associate_ip_event AS 
+          SELECT
+            eventname
+          , eventtime
+          , recipientaccountid accountid
+          , awsRegion region
+          , "json_extract_scalar"(requestparameters, '$.allocationId') allocationId
+          , "json_extract_scalar"(responseElements, '$.associationId') associationId
+          FROM
+            {TRAIL_TABLE_NAME}
+          WHERE ((eventname LIKE '%AssociateAddress%') AND ("from_iso8601_timestamp"(eventtime) > (current_timestamp - INTERVAL  '{EVENT_SEARCH_BACK}' MONTH)))
+          GROUP BY 1, 2, 3, 4, 5, 6'''
+          
+          
+          def query_execution(query):
+              executionResponse = athena.start_query_execution(
+                                  QueryString=query,
+                                  QueryExecutionContext={'Database': DATABASE},
+                                  WorkGroup=ATHENA_WORKGROUP,
+                                  ResultConfiguration={"OutputLocation": RESULT_OUTPUT_LOCATION}
+              )
+              
+              logger.info(executionResponse)
+              response = athena.get_query_execution(QueryExecutionId=executionResponse['QueryExecutionId'])
+              logger.info(response)
+          
+          
+          
+          def log_exception():
+            """Log a stack trace"""
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            print(repr(traceback.format_exception(
+                exc_type,
+                exc_value,
+                exc_traceback)))
+          
+          def send_response(event, context, response):
+            """Send a response to CloudFormation to handle the custom resource lifecycle"""
+            response_body = {
+                'Status': response,
+                'Reason': 'See details in CloudWatch Log Stream: ' + \
+                    context.log_stream_name,
+                'PhysicalResourceId': context.log_stream_name,
+                'StackId': event['StackId'],
+                'RequestId': event['RequestId'],
+                'LogicalResourceId': event['LogicalResourceId'],
+            }
+            print('RESPONSE BODY: \n' + dumps(response_body))
+            data = dumps(response_body).encode('utf-8')
+            req = urllib.request.Request(
+                event['ResponseURL'],
+                data,
+                headers={'Content-Length': len(data), 'Content-Type': ''})
+            req.get_method = lambda: 'PUT'
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    print(f'response.status: {resp.status}, ' +
+                          f'response.reason: {resp.reason}')
+                    print('response from cfn: ' + resp.read().decode('utf-8'))
+            except urllib.error.URLError:
+                log_exception()
+                raise Exception('Received non-200 response while sending response to AWS CloudFormation')
+            return True
+          
+          def custom_resource_handler(event, context):
+            
+            print("Event JSON: \n" + dumps(event))
+            response = 'FAILED'
+            
+            if event['RequestType'] == 'Create':
+                try:
+                    query_execution(associate_ip_event_view)
+                    response = 'SUCCESS'
+                    
+                except Exception as e:
+                    print(f'There was an error {e} creating and committing')
+                    log_exception()
+                    response = 'FAILED'
+                send_response(event, context, response)
+                return
+          
+            if event['RequestType'] == 'Update':
+                print('Update event is happting')
+                try:
+                    query_execution(associate_ip_event_view)
+                    response = 'SUCCESS'
+                    
+                except Exception as e:
+                    print(f'There was an error {e} updating and committing')
+                    log_exception()
+                    response = 'FAILED'
+                send_response(event, context, response)
+                return
+          
+            if event['RequestType'] == 'Delete':
+                try:
+                    query_execution('DROP TABLE eip')
+                    query_execution('DROP VIEW associate_ip_event')
+                    
+                    response = 'SUCCESS'
+                    
+                except Exception as e:
+                    print(f'There was an error {e} deleting and committing')
+                    log_exception()
+                    response = 'FAILED'
+                send_response(event, context, response)
+                return
+
+          
+          
+          def lambda_handler(event, context):
+            """Lambda handler for the custom resource"""
+            try:
+                return custom_resource_handler(event, context)
+            except Exception:
+                log_exception()
+                raise
+                
+      Timeout: 30
+      Runtime: python3.10
+      Handler: 'index.custom_resource_handler'
+      ReservedConcurrentExecutions: 1
+      Role: !GetAtt InitilizerIAMRole.Arn
+      
+  AthenaInitializer:
+    Type: 'Custom::AthenaInitializer'
+    Properties:
+      ServiceToken: !GetAtt InitilizerLambda.Arn
+      EventSearchBack: 
+        Ref: EventSearchBack
+  
+  InitilizerIAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: EIPAnalyzerInitilizerPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'
+              - Effect: Allow
+                Action:
+                  - 'athena:ListWorkGroups'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:GetBucketLocation'
+                  - 'athena:StartQueryExecution'
+                  - 'athena:GetQueryExecution'
+                  - 'glue:GetTable'
+                  - 'glue:CreateTable'
+                  - 'glue:UpdateTable'
+                  - 'glue:GetDatabase'
+                  - 'glue:DeleteTable'
+                 
+                Resource: 
+                  - !Sub 'arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary'
+                  - !Sub 'arn:aws:s3:::${AthenaResultEIPAnalyzer}/*'
+                  - !Sub 'arn:aws:s3:::${AthenaResultEIPAnalyzer}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/default'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/associate_ip_event'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/eip'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/${CloudTrailAthenaTableName}'
+              
+Outputs:
+ ElasticIpFinder:
+    Value: !Ref EIPlistFinder
