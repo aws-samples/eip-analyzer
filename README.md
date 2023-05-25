@@ -8,7 +8,7 @@ In this repo, I will show you how to analyze EIP usage history to have a better 
 
 This solution uses AWS CloudTrail and Amazon Athena to analyze historical EIP attachment activity in your AWS account. AWS CloudTrail and Amazon Athena help make it easier by combining the detailed CloudTrail log files with the power of the Athena SQL engine to easily find, analyze, and respond to changes and activities in an AWS account. 
 
-The solution compares the snapshot of the current EIPs and looks for their most recent attachment within the last three month (date can be customized). it then determines how frequently EIPs were attached to resources. If the attachments are greater than zero that means these EIPs are actively being used. If the attachment count is zero that means these EIPs are running idle and can be released to save costs..
+The solution compares the snapshot of the current EIPs and looks for their most recent attachment within the last three month (date can be customized). it then determines how frequently EIPs were attached to resources. If the attachments are greater than zero that means these EIPs are actively being used. If the attachment count is zero that means these EIPs are running idle and can be released to save costs.
 
 ## Prerequisite 
 
