@@ -68,13 +68,13 @@ TBLPROPERTIES (
   'storage.location.template'='s3://BUCKET/AWSLogs/${account}/CloudTrail/${region}/${day}', 
   'transient_lastDdlTime'='1686327817')
 ```
-2.Replace the following clauses with your account information.
+2. Replace the following clauses with your account information.
 
-* In the LOCATION and storage.location.template clauses, replace BUCKET to point to the Amazon S3 bucket that contains your log data
-* In the projection.account.values, replace with your account-id
+* In the LOCATION and storage.location.template clauses, replace BUCKET to point to the Amazon S3 bucket that contains your log data.
+* In the projection.account.values, replace with your account-id.
 * For projection.day.range, replace 2023/01/01 with the starting date that you want to use.
 
-3.Login in the Athena Console and copy and paste the above DDL statement into the Athena console query editor and choose Run query.
+3. Login in the Athena Console and copy and paste the above DDL statement into the Athena console query editor and choose Run query.
 
 4. Install the AWS CLI - This post uses AWS Command Line Interface (CLI) examples. To utilize these, you must first install and configure the AWS CLI. For more information, see Installing [the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
 
