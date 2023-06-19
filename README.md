@@ -86,8 +86,6 @@ The CloudFormation template creates Athena views to search past AssociateAddress
 
 Run the following commands in a terminal. These commands clone the GitHub repository and deploy the CloudFormation stack to your AWS account
 
-**NOTE** - In CloudFormation parameters, replace TableName with the table name created from step 1 in prerequisites.
-
 ```
 # A) Clone the repository and install jq
 sudo yum install -y jq
@@ -101,7 +99,7 @@ aws cloudformation create-stack \
     --stack-name EIP-analyzer \
     --template-body file://template.yaml \
     --capabilities CAPABILITY_IAM \
-    --parameters ParameterKey=CloudTrailAthenaTable,ParameterValue='cloudtrail-athenatable-eip-analyzer'
+    --parameters ParameterKey=CloudTrailAthenaTableName,ParameterValue='cloudtrail-athenatable-eip-analyzer'
 ```
 Wait for the stack to be created. It should take a few minutes to complete. You can open CloudFormation console to view stack creation process.
 
