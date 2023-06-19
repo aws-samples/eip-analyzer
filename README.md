@@ -14,7 +14,7 @@ The solution compares the snapshot of the current EIPs and looks for their most 
 
 1. Create an Athena table - The first step is to create an Athena table for a CloudTrail trail using [partition projection](https://docs.aws.amazon.com/athena/latest/ug/cloudtrail-logs.html). AWS CloudTrail is a service that records AWS API calls and events for Amazon Web Services accounts.
 
-The following example statement automatically uses partition projection on CloudTrail logs from a specified date until the present. 
+  The following example statement automatically uses partition projection on CloudTrail logs from a specified date until the present. 
 
 ```
 CREATE EXTERNAL TABLE `CloudTrailAthenaTableEIPAnalyzer`(
@@ -70,9 +70,9 @@ TBLPROPERTIES (
 ```
 2. Replace the following clauses with your account information.
 
-* In the LOCATION and storage.location.template clauses, replace BUCKET to point to the Amazon S3 bucket that contains your log data.
-* In the projection.account.values, replace with your account-id.
-* For projection.day.range, replace 2023/01/01 with the starting date that you want to use.
+  * In the LOCATION and storage.location.template clauses, replace BUCKET to point to the Amazon S3 bucket that contains your log data.
+  * In the projection.account.values, replace with your account-id.
+  * For projection.day.range, replace 2023/01/01 with the starting date that you want to use.
 
 3. Login in the Athena Console and copy and paste the above DDL statement into the Athena console query editor and choose Run query.
 
