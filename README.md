@@ -94,7 +94,7 @@ sudo yum install -y jq
 git clone https://github.com/aws-samples/eip-analyzer.git
 
 # B) Switch to the repository's directory
-cd EIP-analyzer
+cd eip-analyzer
 
 # C) Create a stack to deploy all prerequisites 
 aws cloudformation create-stack \
