@@ -12,14 +12,71 @@ The solution compares the snapshot of the current EIPs and looks for their most 
 
 ## Prerequisite 
 
-1. Create an Athena table - The first step is to create an Athena table for a CloudTrail trail using the CloudTrail console. AWS CloudTrail is a service that records AWS API calls and events for Amazon Web Services accounts. 
+1. Create an Athena table - The first step is to create an Athena table for a CloudTrail trail using [partition projection](https://docs.aws.amazon.com/athena/latest/ug/cloudtrail-logs.html). AWS CloudTrail is a service that records AWS API calls and events for Amazon Web Services accounts.
 
-    1. Open the [CloudTrail console](https://console.aws.amazon.com/cloudtrail/home). In the navigation pane, choose Event history. b. Choose Create Athena table.
-    1. For Storage location, use the down arrow to select the Amazon S3 bucket where log files are stored for the trail to query.
-    1. Choose Create table. The table is created with a default name that includes the name of the Amazon S3 bucket.
-    1. Copy table name in notepad as it is required for the next step. It should name like cloudtrail_logs_***
+The following example statement automatically uses partition projection on CloudTrail logs from a specified date until the present. 
 
-2. Install the AWS CLI - This post uses AWS Command Line Interface (CLI) examples. To utilize these, you must first install and configure the AWS CLI. For more information, see Installing [the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+```
+CREATE EXTERNAL TABLE `CloudTrailAthenaTableEIPAnalyzer`(
+  `eventversion` string COMMENT 'from deserializer', 
+  `useridentity` struct<type:string,principalid:string,arn:string,accountid:string,invokedby:string,accesskeyid:string,username:string,sessioncontext:struct<attributes:struct<mfaauthenticated:string,creationdate:string>,sessionissuer:struct<type:string,principalid:string,arn:string,accountid:string,username:string>,ec2roledelivery:string,webidfederationdata:map<string,string>>> COMMENT 'from deserializer', 
+  `eventtime` string COMMENT 'from deserializer', 
+  `eventsource` string COMMENT 'from deserializer', 
+  `eventname` string COMMENT 'from deserializer', 
+  `awsregion` string COMMENT 'from deserializer', 
+  `sourceipaddress` string COMMENT 'from deserializer', 
+  `useragent` string COMMENT 'from deserializer', 
+  `errorcode` string COMMENT 'from deserializer', 
+  `errormessage` string COMMENT 'from deserializer', 
+  `requestparameters` string COMMENT 'from deserializer', 
+  `responseelements` string COMMENT 'from deserializer', 
+  `additionaleventdata` string COMMENT 'from deserializer', 
+  `requestid` string COMMENT 'from deserializer', 
+  `eventid` string COMMENT 'from deserializer', 
+  `readonly` string COMMENT 'from deserializer', 
+  `resources` array<struct<arn:string,accountid:string,type:string>> COMMENT 'from deserializer', 
+  `eventtype` string COMMENT 'from deserializer', 
+  `apiversion` string COMMENT 'from deserializer', 
+  `recipientaccountid` string COMMENT 'from deserializer', 
+  `serviceeventdetails` string COMMENT 'from deserializer', 
+  `sharedeventid` string COMMENT 'from deserializer', 
+  `vpcendpointid` string COMMENT 'from deserializer', 
+  `tlsdetails` struct<tlsversion:string,ciphersuite:string,clientprovidedhostheader:string> COMMENT 'from deserializer')
+PARTITIONED BY ( 
+  `account` string, 
+  `region` string, 
+  `day` string)
+ROW FORMAT SERDE 
+  'org.apache.hive.hcatalog.data.JsonSerDe' 
+STORED AS INPUTFORMAT 
+  'com.amazon.emr.cloudtrail.CloudTrailInputFormat' 
+OUTPUTFORMAT 
+  'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+LOCATION
+  's3://BUCKET/'
+TBLPROPERTIES (
+  'projection.account.type'='enum', 
+  'projection.account.values'='ACCOUNT_ID', 
+  'projection.day.format'='yyyy/MM/dd', 
+  'projection.day.interval'='1', 
+  'projection.day.interval.unit'='DAYS', 
+  'projection.day.range'='2023/01/01,NOW', 
+  'projection.day.type'='date', 
+  'projection.enabled'='true', 
+  'projection.region.type'='enum', 
+  'projection.region.values'='us-east-2,us-east-1,us-west-1,us-west-2,af-south-1,ap-east-1,ap-south-1,ap-northeast-3,ap-northeast-2,ap-southeast-1,ap-southeast-2,ap-northeast-1,ca-central-1,eu-central-1,eu-west-1,eu-west-2,eu-south-1,eu-west-3,eu-north-1,me-south-1,sa-east-1', 
+  'storage.location.template'='s3://BUCKET/AWSLogs/${account}/CloudTrail/${region}/${day}', 
+  'transient_lastDdlTime'='1686327817')
+```
+1.Replace the following clauses with your account information.
+
+* In the LOCATION and storage.location.template clauses, replace BUCKET to point to the Amazon S3 bucket that contains your log data
+* In the projection.account.values, replace with your account-id
+* For projection.day.range, replace 2023/01/01 with the starting date that you want to use.
+
+1.Login in the Athena Console and copy and paste the above DDL statement into the Athena console query editor and choose Run query.
+
+3. Install the AWS CLI - This post uses AWS Command Line Interface (CLI) examples. To utilize these, you must first install and configure the AWS CLI. For more information, see Installing [the AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
 
 ## Implementation
 
