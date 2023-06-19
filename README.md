@@ -14,7 +14,7 @@ The solution compares the snapshot of the current EIPs and looks for their most 
 
 1. Create an Athena table - The first step is to create an Athena table for a CloudTrail trail using [partition projection](https://docs.aws.amazon.com/athena/latest/ug/cloudtrail-logs.html). AWS CloudTrail is a service that records AWS API calls and events for Amazon Web Services accounts.
 
-   The following example statement automatically uses partition projection on CloudTrail logs from a specified date until the present. 
+The following example statement automatically uses partition projection on CloudTrail logs from a specified date until the present. 
 
 ```
 CREATE EXTERNAL TABLE `CloudTrailAthenaTableEIPAnalyzer`(
@@ -101,7 +101,7 @@ aws cloudformation create-stack \
     --stack-name EIP-analyzer \
     --template-body file://template.yaml \
     --capabilities CAPABILITY_IAM \
-    --parameters ParameterKey=CloudTrailAthenaTableName,ParameterValue='TABLENAME'
+    --parameters ParameterKey=CloudTrailAthenaTableEIPAnalyzer,ParameterValue='TABLENAME'
 ```
 Wait for the stack to be created. It should take a few minutes to complete. You can open CloudFormation console to view stack creation process.
 
