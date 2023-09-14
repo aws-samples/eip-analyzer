@@ -2,13 +2,24 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: |
   Elastic IP attachment analyzer
 Parameters:
-  CloudTrailAthenaTableName:
-    Type: String
-    Description: "CloudTrail athena table name"
+  # CloudTrailAthenaTableName:
+  #   Type: String
+  #   Description: "CloudTrail athena table name"
   EventSearchBack:
     Type: Number
     Default: 3
     Description: "Event search back in CloudTrail logs (month)"
+  CloudTrailS3Path:
+    Type: String
+    Description: "CloudTrail S3 location"
+  DAY:
+    Default: '2023/01/01,NOW'
+    Type: String
+    Description: 'Search date'
+  # AccountID:
+  #   Type: String
+  #   Default: 
+  #     Ref: AWS::AccountId
    
 Resources:
 
@@ -105,7 +116,7 @@ Resources:
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/default'
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/'
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/associate_ip_event'
-                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/${CloudTrailAthenaTableName}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/cloudtrailathenatableeipanalyzer'
 
   EIPlistFinder:
     Type: 'AWS::Lambda::Function'
@@ -169,147 +180,222 @@ Resources:
         Variables:
           RESULT_OUTPUT_LOCATION: !Join [ "", ["s3://" , Ref: AthenaResultEIPAnalyzer, "/"]]
           EIP_SNAPSHOT: !Join [ "", ["s3://" , Ref: EIPSnapshot, "/"]]
-          TRAIL_TABLE_NAME:  
-            Ref: CloudTrailAthenaTableName
+          # TRAIL_TABLE_NAME:  
+          #   Ref: CloudTrailAthenaTableName
           EVENT_SEARCH_BACK: 
             Ref: EventSearchBack
+          CLOUDTRAIL_S3_LOCATION:
+            Ref: CloudTrailS3Path
+          AccountID:
+            !Ref "AWS::AccountId"
+          DAY:
+            Ref: DAY
+            
       Code:
         ZipFile: |
-          from json import dumps
-          import sys
-          import os
-          import traceback
-          import urllib.request
-          import boto3
-          import logging
-          logger = logging.getLogger(__name__)
-          
-          
-          athena = boto3.client('athena')
-          ATHENA_WORKGROUP = 'primary'
-          DATABASE = 'default'
-          RESULT_OUTPUT_LOCATION = os.environ['RESULT_OUTPUT_LOCATION']
-          TRAIL_TABLE_NAME = os.environ['TRAIL_TABLE_NAME']
-          EVENT_SEARCH_BACK = os.environ['EVENT_SEARCH_BACK']
-          EIP_SNAPSHOT = os.environ['EIP_SNAPSHOT']
-          
-          associate_ip_event_view = f'''CREATE OR REPLACE VIEW associate_ip_event AS 
-          SELECT
-            eventname
-          , eventtime
-          , recipientaccountid accountid
-          , awsRegion region
-          , "json_extract_scalar"(requestparameters, '$.allocationId') allocationId
-          , "json_extract_scalar"(responseElements, '$.associationId') associationId
-          FROM
-            {TRAIL_TABLE_NAME}
-          WHERE ((eventname LIKE '%AssociateAddress%') AND ("from_iso8601_timestamp"(eventtime) > (current_timestamp - INTERVAL  '{EVENT_SEARCH_BACK}' MONTH)))
-          GROUP BY 1, 2, 3, 4, 5, 6'''
-          
-          
-          def query_execution(query):
-              executionResponse = athena.start_query_execution(
-                                  QueryString=query,
-                                  QueryExecutionContext={'Database': DATABASE},
-                                  WorkGroup=ATHENA_WORKGROUP,
-                                  ResultConfiguration={"OutputLocation": RESULT_OUTPUT_LOCATION}
-              )
+              from json import dumps
+              import sys
+              import os
+              import traceback
+              import urllib.request
+              import boto3
+              import logging
+              logger = logging.getLogger(__name__)
               
-              logger.info(executionResponse)
-              response = athena.get_query_execution(QueryExecutionId=executionResponse['QueryExecutionId'])
-              logger.info(response)
-          
-          
-          
-          def log_exception():
-            """Log a stack trace"""
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            print(repr(traceback.format_exception(
-                exc_type,
-                exc_value,
-                exc_traceback)))
-          
-          def send_response(event, context, response):
-            """Send a response to CloudFormation to handle the custom resource lifecycle"""
-            response_body = {
-                'Status': response,
-                'Reason': 'See details in CloudWatch Log Stream: ' + \
-                    context.log_stream_name,
-                'PhysicalResourceId': context.log_stream_name,
-                'StackId': event['StackId'],
-                'RequestId': event['RequestId'],
-                'LogicalResourceId': event['LogicalResourceId'],
-            }
-            print('RESPONSE BODY: \n' + dumps(response_body))
-            data = dumps(response_body).encode('utf-8')
-            req = urllib.request.Request(
-                event['ResponseURL'],
-                data,
-                headers={'Content-Length': len(data), 'Content-Type': ''})
-            req.get_method = lambda: 'PUT'
-            try:
-                with urllib.request.urlopen(req) as resp:
-                    print(f'response.status: {resp.status}, ' +
-                          f'response.reason: {resp.reason}')
-                    print('response from cfn: ' + resp.read().decode('utf-8'))
-            except urllib.error.URLError:
-                log_exception()
-                raise Exception('Received non-200 response while sending response to AWS CloudFormation')
-            return True
-          
-          def custom_resource_handler(event, context):
-            
-            print("Event JSON: \n" + dumps(event))
-            response = 'FAILED'
-            
-            if event['RequestType'] == 'Create':
+              
+              athena = boto3.client('athena')
+              
+              ATHENA_WORKGROUP = 'primary'
+              DATABASE = 'default'
+              RESULT_OUTPUT_LOCATION = os.environ['RESULT_OUTPUT_LOCATION']
+              TRAIL_TABLE_NAME = "cloudtrailathenatableeipanalyzer"
+              CLOUDTRAIL_S3_LOCATION = os.environ['CLOUDTRAIL_S3_LOCATION']
+              ACCOUNT = os.environ['AccountID']
+              DAY = os.environ['DAY']
+              
+              
+              EVENT_SEARCH_BACK = os.environ['EVENT_SEARCH_BACK']
+              EIP_SNAPSHOT = os.environ['EIP_SNAPSHOT']
+              
+              associate_ip_event_view = f'''CREATE OR REPLACE VIEW associate_ip_event AS 
+              SELECT
+                eventname
+              , eventtime
+              , recipientaccountid accountid
+              , awsRegion region
+              , "json_extract_scalar"(requestparameters, '$.allocationId') allocationId
+              , "json_extract_scalar"(responseElements, '$.associationId') associationId
+              FROM
+                {TRAIL_TABLE_NAME}
+              WHERE ((eventname LIKE '%AssociateAddress%') AND ("from_iso8601_timestamp"(eventtime) > (current_timestamp - INTERVAL  '{EVENT_SEARCH_BACK}' MONTH)))
+              GROUP BY 1, 2, 3, 4, 5, 6'''
+              
+              account_string = "${account}"
+              region_string = "${region}"
+              day_string = "${day}"
+              
+              cloudtrail_athena_table = f'''CREATE EXTERNAL TABLE `cloudtrailathenatableeipanalyzer`(
+              `eventversion` string, 
+              `useridentity` struct<type:string,principalid:string,arn:string,accountid:string,invokedby:string,accesskeyid:string,username:string,sessioncontext:struct<attributes:struct<mfaauthenticated:string,creationdate:string>,sessionissuer:struct<type:string,principalid:string,arn:string,accountid:string,username:string>,ec2roledelivery:string,webidfederationdata:map<string,string>>> , 
+              `eventtime` string, 
+              `eventsource` string, 
+              `eventname` string, 
+              `awsregion` string, 
+              `sourceipaddress` string, 
+              `useragent` string, 
+              `errorcode` string, 
+              `errormessage` string, 
+              `requestparameters` string, 
+              `responseelements` string, 
+              `additionaleventdata` string, 
+              `requestid` string, 
+              `eventid` string, 
+              `readonly` string, 
+              `resources` array<struct<arn:string,accountid:string,type:string>> , 
+              `eventtype` string, 
+              `apiversion` string, 
+              `recipientaccountid` string, 
+              `serviceeventdetails` string, 
+              `sharedeventid` string, 
+              `vpcendpointid` string, 
+              `tlsdetails` struct<tlsversion:string,ciphersuite:string,clientprovidedhostheader:string> )
+              PARTITIONED BY ( 
+              `account` string, 
+              `region` string, 
+              `day` string)
+              ROW FORMAT SERDE 
+              'org.apache.hive.hcatalog.data.JsonSerDe' 
+              STORED AS INPUTFORMAT 
+              'com.amazon.emr.cloudtrail.CloudTrailInputFormat' 
+              OUTPUTFORMAT 
+              'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
+              LOCATION
+              's3://{CLOUDTRAIL_S3_LOCATION}/'
+              TBLPROPERTIES (
+                'projection.account.type'='enum', 
+                'projection.account.values'='{ACCOUNT}', 
+                'projection.day.format'='yyyy/MM/dd', 
+                'projection.day.interval'='1', 
+                'projection.day.interval.unit'='DAYS', 
+                'projection.day.range'='{DAY}', 
+                'projection.day.type'='date', 
+                'projection.enabled'='true', 
+                'projection.region.type'='enum', 
+                'projection.region.values'='us-east-2,us-east-1,us-west-1,us-west-2,af-south-1,ap-east-1,ap-south-1,ap-northeast-3,ap-northeast-2,ap-southeast-1,ap-southeast-2,ap-northeast-1,ca-central-1,eu-central-1,eu-west-1,eu-west-2,eu-south-1,eu-west-3,eu-north-1,me-south-1,sa-east-1', 
+                'storage.location.template'='s3://{CLOUDTRAIL_S3_LOCATION}/AWSLogs/{account_string}/CloudTrail/{region_string}/{day_string}', 
+                'transient_lastDdlTime'='1686327817')'''
+              
+              
+              
+              def query_execution(query):
+                  executionResponse = athena.start_query_execution(
+                                      QueryString=query,
+                                      QueryExecutionContext={'Database': DATABASE},
+                                      WorkGroup=ATHENA_WORKGROUP,
+                                      ResultConfiguration={"OutputLocation": RESULT_OUTPUT_LOCATION}
+                  )
+                  
+                  logger.info(executionResponse)
+                  response = athena.get_query_execution(QueryExecutionId=executionResponse['QueryExecutionId'])
+                  logger.info(response)
+              
+              
+              
+              def log_exception():
+                """Log a stack trace"""
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                print(repr(traceback.format_exception(
+                    exc_type,
+                    exc_value,
+                    exc_traceback)))
+              
+              def send_response(event, context, response):
+                """Send a response to CloudFormation to handle the custom resource lifecycle"""
+                response_body = {
+                    'Status': response,
+                    'Reason': 'See details in CloudWatch Log Stream: ' + \
+                        context.log_stream_name,
+                    'PhysicalResourceId': context.log_stream_name,
+                    'StackId': event['StackId'],
+                    'RequestId': event['RequestId'],
+                    'LogicalResourceId': event['LogicalResourceId'],
+                }
+                print('RESPONSE BODY: \n' + dumps(response_body))
+                data = dumps(response_body).encode('utf-8')
+                req = urllib.request.Request(
+                    event['ResponseURL'],
+                    data,
+                    headers={'Content-Length': len(data), 'Content-Type': ''})
+                req.get_method = lambda: 'PUT'
                 try:
-                    query_execution(associate_ip_event_view)
-                    response = 'SUCCESS'
-                    
-                except Exception as e:
-                    print(f'There was an error {e} creating and committing')
+                    with urllib.request.urlopen(req) as resp:
+                        print(f'response.status: {resp.status}, ' +
+                              f'response.reason: {resp.reason}')
+                        print('response from cfn: ' + resp.read().decode('utf-8'))
+                except urllib.error.URLError:
                     log_exception()
-                    response = 'FAILED'
-                send_response(event, context, response)
-                return
-          
-            if event['RequestType'] == 'Update':
-                print('Update event is happting')
+                    raise Exception('Received non-200 response while sending response to AWS CloudFormation')
+                return True
+              
+              def custom_resource_handler(event, context):
+                
+                print("Event JSON: \n" + dumps(event))
+                response = 'FAILED'
+                
+                if event['RequestType'] == 'Create':
+                    try:
+                        query_execution(associate_ip_event_view)
+                        query_execution(cloudtrail_athena_table)
+                        response = 'SUCCESS'
+                        
+                    except Exception as e:
+                        print(f'There was an error {e} creating and committing')
+                        log_exception()
+                        response = 'FAILED'
+                    send_response(event, context, response)
+                    return
+              
+                if event['RequestType'] == 'Update':
+                    print('Update event is happting')
+                    try:
+                        query_execution(associate_ip_event_view)
+                        query_execution(cloudtrail_athena_table)
+                        response = 'SUCCESS'
+                        
+                    except Exception as e:
+                        print(f'There was an error {e} updating and committing')
+                        log_exception()
+                        response = 'FAILED'
+                    send_response(event, context, response)
+                    return
+              
+                if event['RequestType'] == 'Delete':
+                    try:
+                        query_execution('DROP TABLE eip')
+                        query_execution('DROP TABLE cloudtrailathenatableeipanalyzer')
+                        query_execution('DROP VIEW associate_ip_event')
+                        
+                        
+                        response = 'SUCCESS'
+                        
+                    except Exception as e:
+                        print(f'There was an error {e} deleting and committing')
+                        log_exception()
+                        response = 'FAILED'
+                    send_response(event, context, response)
+                    return
+              
+              
+              
+              def lambda_handler(event, context):
+                """Lambda handler for the custom resource"""
                 try:
-                    query_execution(associate_ip_event_view)
-                    response = 'SUCCESS'
-                    
-                except Exception as e:
-                    print(f'There was an error {e} updating and committing')
+                    return custom_resource_handler(event, context)
+                except Exception:
                     log_exception()
-                    response = 'FAILED'
-                send_response(event, context, response)
-                return
-          
-            if event['RequestType'] == 'Delete':
-                try:
-                    query_execution('DROP TABLE eip')
-                    query_execution('DROP VIEW associate_ip_event')
+                    raise
                     
-                    response = 'SUCCESS'
-                    
-                except Exception as e:
-                    print(f'There was an error {e} deleting and committing')
-                    log_exception()
-                    response = 'FAILED'
-                send_response(event, context, response)
-                return
 
-          
-          
-          def lambda_handler(event, context):
-            """Lambda handler for the custom resource"""
-            try:
-                return custom_resource_handler(event, context)
-            except Exception:
-                log_exception()
-                raise
                 
       Timeout: 30
       Runtime: python3.10
@@ -374,7 +460,7 @@ Resources:
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/'
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/associate_ip_event'
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/eip'
-                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/${CloudTrailAthenaTableName}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/default/cloudtrailathenatableeipanalyzer'
               
 Outputs:
  ElasticIpFinder:
