@@ -13,6 +13,7 @@ On the other hand, Amazon Athena is an interactive query service that simplifies
 By extracting detailed information from AWS CloudTrail and querying it using Athena, this solution streamlines the process of data collection, analysis, and reporting of EIP usage within an AWS account.
 
 To gather EIP usage reporting, this solution compares snapshots of the current EIPs, focusing on their most recent attachment within a customizable three-month period. It then determines the frequency of EIP attachments to resources. An attachment counts greater than zero suggests that the EIPs are actively in use. In contrast, an attachment count of zero indicates that these EIPs are idle and can be released, aiding in identifying potential areas for cost reduction.
+
 ![eip1](https://github.com/aws-samples/eip-analyzer/assets/32849802/3d52556c-1a15-4185-a2aa-137ac061ae63)
 
 ## Prerequisite 
