@@ -39,7 +39,7 @@ aws cloudformation create-stack \
     --stack-name EIP-analyzer \
     --template-body file://template.yaml \
     --capabilities CAPABILITY_IAM \
-    --parameters ParameterKey=CloudTrailAthenaTableName,ParameterValue='TABLENAME'
+    --parameters ParameterKey=CloudTrailS3Path,ParameterValue='**REPLACE_CLOUDTRAIL_S3_LOCATION**'
 ```
 Wait for the stack to be created. It should take a few minutes to complete. You can open CloudFormation console to view stack creation process.
 
